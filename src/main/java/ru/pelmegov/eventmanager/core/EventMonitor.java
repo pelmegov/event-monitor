@@ -3,17 +3,13 @@ package ru.pelmegov.eventmanager.core;
 import lombok.Getter;
 import lombok.NonNull;
 import lombok.extern.java.Log;
-import ru.pelmegov.eventmanager.constants.EventCountConstants;
 import ru.pelmegov.eventmanager.core.ratelimit.RateLimit;
 import ru.pelmegov.eventmanager.core.ratelimit.strategy.RateLimitStrategy;
+import ru.pelmegov.eventmanager.core.storage.EventStorage;
 import ru.pelmegov.eventmanager.domain.EventData;
 
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.LinkedBlockingDeque;
-
-import static java.util.stream.Collectors.toList;
 
 @Log
 public class EventMonitor {
@@ -21,11 +17,11 @@ public class EventMonitor {
     @Getter
     private EventArguments eventArguments;
 
-    private BlockingQueue<EventData> eventDataBlockingQueue;
+    private EventStorage eventDataStorage;
     private RateLimit rateLimitAccumulator;
 
     private EventMonitor() {
-        this.eventDataBlockingQueue = new LinkedBlockingDeque<>(EventCountConstants.MAX_EVENTS_IN_DAY);
+        this.eventDataStorage = new EventStorage();
     }
 
     public boolean putEvent(@NonNull EventData eventData) {
@@ -36,19 +32,17 @@ public class EventMonitor {
             return false;
         }
 
-        removeOldEvents();
+        eventDataStorage.removeOldEvents();
 
         if (checkAllowedEvents(eventData.getEventName())) {
-            return eventDataBlockingQueue.add(eventData);
+            return eventDataStorage.addEvent(eventData);
         }
 
         throw new IllegalArgumentException("Incorrect event!");
     }
 
     public List<EventData> lastEventsAfterTime(@NonNull LocalDateTime startTime) {
-        return eventDataBlockingQueue.parallelStream()
-                .filter(e -> e.getEventTime().isAfter(startTime))
-                .collect(toList());
+        return eventDataStorage.getEventsAfterTime(startTime);
     }
 
     public static class Builder {
@@ -67,12 +61,6 @@ public class EventMonitor {
         public EventMonitor build() {
             return eventMonitor;
         }
-    }
-
-    private void removeOldEvents() {
-        eventDataBlockingQueue.removeIf(
-                e -> e.getEventTime().isBefore(LocalDateTime.now().minusDays(1))
-        );
     }
 
     private boolean checkAllowedEvents(@NonNull String eventName) {
